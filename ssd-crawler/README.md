@@ -1,67 +1,74 @@
-# SSD Best-Value Finder
+# SSD Best-Value Finder (SerpAPI / Google Shopping)
 
-Finds the best-value external SSDs from **500GB to 8TB** across well-known
-brands by scraping Newegg's public search results. No API key required.
+Finds **in-stock external SSDs from 500GB to 8TB** across major retailers
+(Amazon, Best Buy, Walmart, Newegg, B&H, and more), filtered to reputable
+SSD brands and ranked by **price-per-terabyte**. Each result includes the
+selling retailer, rating, and a working link to buy.
 
-For each capacity tier it runs a search, parses every listing, and ranks
-results by **price-per-terabyte** — so you see genuine best value, not just
-the lowest sticker price.
+> **Heads up — you may not need this.** Websites already do this well:
+> - **https://diskprices.com** — ranks storage by $/TB with direct buy links (best match)
+> - **https://shopping.google.com** — all major retailers, in-stock, buy links
+> - **https://pcpartpicker.com** — storage filters across retailers
+>
+> This script is for when you want programmatic/scheduled output (e.g. a
+> cron job that emails you when a drive drops below a $/TB threshold) that
+> a website can't give you.
+
+## Why an API instead of scraping
+
+Major retailers block scrapers and load price/stock via JavaScript, so
+static scraping returns blocked pages or stale stock. SerpAPI's Google
+Shopping engine surfaces only live, purchasable offers and returns
+canonical links that work — which is what makes "truly in stock + working
+buy link" achievable.
 
 ## Setup
 
-```
-pip3 install -r requirements.txt
-```
+1. Get a free key at https://serpapi.com/ (free tier ~100 searches/mo).
+2. ```
+   export SERPAPI_API_KEY=your_key_here
+   ```
+
+No third-party Python packages required (standard library only).
 
 ## Usage
 
 ```
-python3 crawler.py                       # live: all tiers, no price cap
-python3 crawler.py --max-price 200       # only show deals at/under $200
+python3 crawler.py                          # all tiers, all trusted retailers
+python3 crawler.py --max-price 200
 python3 crawler.py --min-gb 1000 --max-gb 4000
 python3 crawler.py --brands Samsung,Crucial
-python3 crawler.py --html-file saved.html   # offline: parse a saved page
+python3 crawler.py --input-file sample_serpapi.json   # offline test
 ```
 
-| Flag          | Default                                              | Description                          |
-|---------------|------------------------------------------------------|--------------------------------------|
-| `--min-gb`    | `500`                                                | Minimum capacity in GB               |
-| `--max-gb`    | `8000`                                               | Maximum capacity in GB               |
-| `--max-price` | _(none)_                                             | Optional max price in USD            |
-| `--brands`    | `Samsung,SanDisk,WD,Western Digital,Crucial,Seagate,Kingston` | Comma-separated brand allow-list |
-| `--html-file` | _(none)_                                             | Parse a saved page instead of fetching |
-| `--output`    | `results.json`                                       | Where to save JSON results           |
+| Flag           | Default                          | Description                              |
+|----------------|----------------------------------|------------------------------------------|
+| `--min-gb`     | `500`                            | Minimum capacity in GB                   |
+| `--max-gb`     | `8000`                           | Maximum capacity in GB                   |
+| `--max-price`  | _(none)_                         | Optional max price in USD                |
+| `--brands`     | Samsung, SanDisk, WD, Crucial, Seagate, Kingston, SK Hynix, Sabrent, Lexar, ADATA, Corsair | Reputable-brand allow-list |
+| `--retailers`  | Amazon, Best Buy, Walmart, Newegg, B&H, Target, Costco, Micro Center, Dell, … | Trusted-retailer allow-list |
+| `--api-key`    | `$SERPAPI_API_KEY`               | SerpAPI key                              |
+| `--input-file` | _(none)_                         | Parse a saved SerpAPI JSON response      |
+| `--output`     | `results.json`                   | Where to save JSON results               |
 
-## What makes this reliable
+## Reliability features
 
-- **No bad links.** Every product URL is validated as a canonical Newegg
-  product page (`https://www.newegg.com/.../p/<id>`) before it's shown.
-  Anything that doesn't validate (relative links, ad slots, broken hrefs)
-  is dropped.
-- **Self-diagnosing.** If nothing matches, it prints exactly how many
-  listings were dropped at each filter stage (not SSD, not external, wrong
-  capacity, bad URL, no price, over price cap, brand mismatch). You never
-  have to guess why a run came back empty:
-  - `parsed = 0` → Newegg served a bot-check page instead of results.
-  - `parsed` high but all dropped → loosen `--max-price` or `--brands`.
-- **Robust parsing.** Brand is read from the product feature list, price
-  handles both Newegg layouts, and capacity is parsed from the title and
-  normalized to GB. Verified against live Newegg markup (2026-06-21).
+- **In-stock only.** Google Shopping surfaces live offers; anything flagged
+  out of stock is dropped.
+- **No bad links.** Every result must have a valid `http(s)` buy link;
+  direct merchant URLs are preferred over Google redirects.
+- **Reputable brands + trusted retailers only.** Off-brand drives and
+  no-name marketplace sellers are filtered out.
+- **Self-diagnosing.** If nothing matches, it prints how many items were
+  dropped at each stage (not SSD, not external, wrong capacity, untrusted
+  retailer, off-brand, out of stock, no price, over price, bad link).
 
 ## Offline testing
 
-`sample_newegg_page.html` mirrors Newegg's real markup and is used to test
-the parser without the network:
+`sample_serpapi.json` mirrors SerpAPI's real response structure and is used
+to test the filtering logic without an API key:
 
 ```
-python3 crawler.py --html-file sample_newegg_page.html
+python3 crawler.py --input-file sample_serpapi.json
 ```
-
-## Notes
-
-- Intended for light, personal use — it makes a handful of requests (one
-  per capacity tier) and checks `robots.txt` first. Don't schedule it to
-  run frequently or at scale; that would likely violate Newegg's terms.
-- If Newegg changes its markup again, run with `--html-file` on a freshly
-  saved page and check the diagnostic counts to see which selector in
-  `parse_listings()` needs updating.

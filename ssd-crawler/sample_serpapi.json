@@ -1,0 +1,112 @@
+{
+  "_comment": "Synthetic SerpAPI google_shopping response mirroring the real field structure (title, source, price, extracted_price, rating, reviews, link, product_link). Used only to offline-test crawler.py. Not real data.",
+  "shopping_results": [
+    {
+      "position": 1,
+      "title": "Crucial X9 1TB Portable External SSD USB-C Solid State Drive",
+      "source": "Amazon.com",
+      "price": "$59.99",
+      "extracted_price": 59.99,
+      "rating": 4.8,
+      "reviews": 12500,
+      "link": "https://www.amazon.com/dp/B0C1234X9",
+      "product_link": "https://www.google.com/shopping/product/1"
+    },
+    {
+      "position": 2,
+      "title": "SAMSUNG T7 Shield 1TB Portable External SSD USB 3.2",
+      "source": "Best Buy",
+      "price": "$89.99",
+      "extracted_price": 89.99,
+      "rating": 4.9,
+      "reviews": 8800,
+      "product_link": "https://www.google.com/shopping/product/2"
+    },
+    {
+      "position": 3,
+      "title": "SAMSUNG T7 500GB External Portable SSD USB 3.2 Gen 2",
+      "source": "Walmart",
+      "price": "$44.99",
+      "extracted_price": 44.99,
+      "rating": 4.7,
+      "reviews": 3200,
+      "link": "https://www.walmart.com/ip/samsung-t7-500gb"
+    },
+    {
+      "position": 4,
+      "title": "SanDisk 2TB Extreme Portable External SSD Up to 1050MB/s",
+      "source": "Newegg.com",
+      "price": "$129.99",
+      "extracted_price": 129.99,
+      "rating": 4.8,
+      "reviews": 21000,
+      "link": "https://www.newegg.com/p/N82E16820333002"
+    },
+    {
+      "position": 5,
+      "title": "WD_BLACK P40 4TB External Portable Gaming SSD USB 3.2",
+      "source": "B&H Photo-Video",
+      "price": "$289.99",
+      "extracted_price": 289.99,
+      "rating": 4.6,
+      "reviews": 1500,
+      "link": "https://www.bhphotovideo.com/c/product/wd-black-p40-4tb"
+    },
+    {
+      "position": 6,
+      "title": "Seagate One Touch 8TB External Portable SSD Hub USB-C",
+      "source": "Amazon.com",
+      "price": "$699.99",
+      "extracted_price": 699.99,
+      "rating": 4.5,
+      "reviews": 600,
+      "link": "https://www.amazon.com/dp/B0SEAGATE8T"
+    },
+    {
+      "position": 7,
+      "_note": "EXCLUDED: internal drive, not external",
+      "title": "Crucial P3 1TB Internal NVMe M.2 SSD",
+      "source": "Amazon.com",
+      "price": "$49.99",
+      "extracted_price": 49.99,
+      "link": "https://www.amazon.com/dp/B0CRUCIALP3"
+    },
+    {
+      "position": 8,
+      "_note": "EXCLUDED: off-brand manufacturer",
+      "title": "Nusyn NSU53 1TB External Portable SSD Up to 1050MB/s",
+      "source": "Amazon.com",
+      "price": "$39.99",
+      "extracted_price": 39.99,
+      "link": "https://www.amazon.com/dp/B0NUSYN53"
+    },
+    {
+      "position": 9,
+      "_note": "EXCLUDED: untrusted/no-name retailer",
+      "title": "Samsung T7 1TB External Portable SSD",
+      "source": "RandomDealsXYZ Marketplace",
+      "price": "$34.99",
+      "extracted_price": 34.99,
+      "link": "https://randomdealsxyz.example/samsung-t7"
+    },
+    {
+      "position": 10,
+      "_note": "EXCLUDED: explicitly out of stock",
+      "title": "Kingston XS2000 1TB External Portable SSD",
+      "source": "Best Buy",
+      "price": "$74.99",
+      "extracted_price": 74.99,
+      "availability": "Out of stock",
+      "link": "https://www.bestbuy.com/kingston-xs2000-1tb"
+    },
+    {
+      "position": 11,
+      "_note": "EXCLUDED: no valid buy link",
+      "title": "WD My Passport 1TB External Portable SSD",
+      "source": "Walmart",
+      "price": "$69.99",
+      "extracted_price": 69.99,
+      "link": "not-a-real-url"
+    }
+  ]
+}
