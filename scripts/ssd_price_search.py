@@ -163,64 +163,96 @@ def fetch(url: str, timeout: float = 12.0, retries: int = 2, verbose: bool = Fal
 
 
 # ----------------------------------------------------------------------------
-# Search backends — discover live product pages. Multiple fallbacks because any
-# single front-end may rate-limit. A SERPAPI_KEY env var, if present, is used first.
+# Search backends — discover live product pages. Several independent engines so
+# no single front-end rate-limiting (common on mobile IPs) can blank the run.
+# Results are aggregated across engines for both resilience and retailer variety.
 # ----------------------------------------------------------------------------
-def search_urls(query: str, limit: int, timeout: float, verbose: bool) -> list[str]:
-    for backend in (_search_ddg_lite, _search_ddg_html):
-        urls = backend(query, limit, timeout, verbose)
-        if urls:
-            return urls[:limit]
-    return []
+# name -> URL template with a {q} placeholder for the URL-encoded query.
+SEARCH_ENGINES: dict[str, str] = {
+    "ddg-lite":  "https://lite.duckduckgo.com/lite/?q={q}",
+    "ddg-html":  "https://html.duckduckgo.com/html/?q={q}",
+    "bing":      "https://www.bing.com/search?q={q}&count=20",
+    "brave":     "https://search.brave.com/search?q={q}",
+    "mojeek":    "https://www.mojeek.com/search?q={q}",
+    "startpage": "https://www.startpage.com/sp/search?query={q}",
+}
+DEFAULT_ENGINE_ORDER = ["ddg-lite", "bing", "mojeek", "ddg-html", "brave", "startpage"]
 
 
-def _clean_ddg_link(href: str) -> str | None:
-    # DDG wraps organic results as /l/?uddg=<encoded real url>. Decode those.
+def search_urls(query: str, limit: int, timeout: float, verbose: bool,
+                engines: list[str] | None = None) -> list[str]:
+    """Aggregate retailer product URLs across multiple search engines. Keeps
+    pulling from the next engine until `limit` unique URLs are gathered, so a
+    single throttled engine just gets topped up by the others."""
+    order = engines or DEFAULT_ENGINE_ORDER
+    out: list[str] = []
+    seen: set[str] = set()
+    for name in order:
+        if len(out) >= limit:
+            break
+        for u in _search_one(name, query, timeout, verbose):
+            key = u.split("?")[0]
+            if key not in seen:
+                seen.add(key)
+                out.append(u)
+        if verbose:
+            print(f"      [{name}] running total {len(out)} urls", file=sys.stderr)
+    return out[:limit]
+
+
+def _search_one(engine: str, query: str, timeout: float, verbose: bool) -> list[str]:
+    template = SEARCH_ENGINES.get(engine)
+    if not template:
+        return []
+    url = template.format(q=urllib.parse.quote_plus(query))
+    body = fetch(url, timeout=timeout, retries=1, verbose=verbose)
+    if not body:
+        return []
+    out: list[str] = []
+    for m in re.finditer(r'href=["\']([^"\']+)["\']', body):
+        real = _clean_redirect_link(html.unescape(m.group(1)))
+        if real and _is_retailer_url(real) and real not in out:
+            out.append(real)
+    return out
+
+
+def _clean_redirect_link(href: str) -> str | None:
+    """Unwrap the redirect wrappers different engines use, returning the real
+    destination URL (or None for engine-internal / ad links)."""
+    # DuckDuckGo: /l/?uddg=<encoded real url>
     if "uddg=" in href:
         params = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
         if "uddg" in params:
             return urllib.parse.unquote(params["uddg"][0])
-    # Skip DDG's own ad/tracking endpoints (y.js, /l/ without uddg, etc.) — these
-    # embed retailer names in their tracking params and would otherwise sail past
-    # the retailer filter and waste time timing out.
+    # Startpage (piurl=) and other engines that wrap the destination in a param.
     if href.startswith("http"):
+        for param in ("piurl", "url", "u3"):
+            if f"{param}=" in href:
+                params = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                cand = params.get(param, [""])[0]
+                if cand.startswith("http"):
+                    return urllib.parse.unquote(cand)
         return href
     return None
+
+
+# kept as a thin alias so older callers / tests keep working
+def _clean_ddg_link(href: str) -> str | None:
+    return _clean_redirect_link(href)
+
+
+# search-engine hosts whose own pages must never be treated as product results
+_ENGINE_HOSTS = ("duckduckgo.com", "bing.com", "brave.com", "mojeek.com",
+                 "startpage.com", "google.com", "microsofttranslator.com")
 
 
 def _is_retailer_url(url: str) -> bool:
     """Match RETAILER_HINTS against the HOSTNAME only, so ad/redirect URLs that
     merely mention a retailer in their query string are rejected."""
     host = urllib.parse.urlparse(url).netloc.lower()
-    if not host or "duckduckgo.com" in host or "/y.js" in url:
+    if not host or "/y.js" in url or any(e in host for e in _ENGINE_HOSTS):
         return False
     return any(h.rstrip(".") in host for h in RETAILER_HINTS)
-
-
-def _search_ddg_lite(query: str, limit: int, timeout: float, verbose: bool) -> list[str]:
-    url = "https://lite.duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": query})
-    body = fetch(url, timeout=timeout, verbose=verbose)
-    if not body:
-        return []
-    out: list[str] = []
-    for m in re.finditer(r'href="([^"]+)"', body):
-        real = _clean_ddg_link(html.unescape(m.group(1)))
-        if real and _is_retailer_url(real) and real not in out:
-            out.append(real)
-    return out
-
-
-def _search_ddg_html(query: str, limit: int, timeout: float, verbose: bool) -> list[str]:
-    url = "https://html.duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
-    body = fetch(url, timeout=timeout, verbose=verbose)
-    if not body:
-        return []
-    out: list[str] = []
-    for m in re.finditer(r'href="([^"]+)"', body):
-        real = _clean_ddg_link(html.unescape(m.group(1)))
-        if real and _is_retailer_url(real) and real not in out:
-            out.append(real)
-    return out
 
 
 # ----------------------------------------------------------------------------
@@ -390,14 +422,14 @@ def _html_title(page_html: str) -> str | None:
 # Orchestration
 # ----------------------------------------------------------------------------
 def hunt(queries: list[str], limit: int, timeout: float, workers: int,
-         verbose: bool) -> list[Offer]:
+         verbose: bool, engines: list[str] | None = None) -> list[Offer]:
     # 1. discover candidate product URLs across all queries
     candidate_urls: list[str] = []
     seen = set()
     for q in queries:
         if verbose:
             print(f"  searching: {q}", file=sys.stderr)
-        for u in search_urls(q, limit, timeout, verbose):
+        for u in search_urls(q, limit, timeout, verbose, engines):
             key = u.split("?")[0]
             if key not in seen:
                 seen.add(key)
@@ -564,6 +596,15 @@ def selftest() -> int:
     check("uddg redirect decoded to real url",
           _clean_ddg_link("//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.newegg.com%2Fp%2FX")
           == "https://www.newegg.com/p/X")
+    # multi-engine support
+    check("bing host rejected",
+          not _is_retailer_url("https://www.bing.com/search?q=ssd"))
+    check("brave/mojeek direct retailer link accepted",
+          _is_retailer_url("https://www.bestbuy.com/site/crucial-p3/123.p"))
+    check("startpage piurl unwrapped",
+          _clean_redirect_link(
+              "https://www.startpage.com/sp/search?piurl=https%3A%2F%2Fwww.amazon.com%2Fdp%2FZ")
+          == "https://www.amazon.com/dp/Z")
 
     q_int = build_queries(["crucial"], 1.0, None, "internal")
     q_ext = build_queries(["samsung"], 1.0, None, "external")
@@ -640,6 +681,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--top", type=int, default=20, help="rows to show in the leaderboard (default 20)")
     p.add_argument("--limit", type=int, default=6, help="product pages per query (default 6)")
     p.add_argument("--workers", type=int, default=8, help="parallel fetches (default 8)")
+    p.add_argument("--engines", nargs="+", default=None, metavar="ENGINE",
+                   choices=list(SEARCH_ENGINES),
+                   help="search engines to use, in order (default: all). "
+                        "Choices: " + ", ".join(SEARCH_ENGINES))
     p.add_argument("--timeout", type=float, default=12.0, help="per-request timeout seconds")
     p.add_argument("--json", metavar="FILE", help="also write results as JSON")
     p.add_argument("--selftest", action="store_true", help="run offline parser tests and exit")
@@ -659,7 +704,8 @@ def main(argv: list[str]) -> int:
     print(f"Hunting {args.capacity:g} TB {label[args.drive_type]} SSD across "
           f"{len(queries)} model queries from: {', '.join(brands)}")
 
-    offers = hunt(queries, args.limit, args.timeout, args.workers, args.verbose)
+    offers = hunt(queries, args.limit, args.timeout, args.workers, args.verbose,
+                  args.engines)
     ranked = dedupe_and_rank(offers, args.capacity)
     print_leaderboard(ranked, args.capacity, args.top)
 
