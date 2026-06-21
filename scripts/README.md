@@ -1,7 +1,9 @@
 # SSD Price Search
 
 `ssd_price_search.py` — a realtime price hunter for a 1 TB SSD from good-value
-brands (Crucial, WD, Samsung, Kingston, TeamGroup, Silicon Power, SK hynix).
+brands, covering both **internal** drives (M.2 NVMe / 2.5" SATA) and
+**external/portable** USB-C drives (Samsung T7/T9, Crucial X9/X10, SanDisk
+Extreme, WD My Passport, Kingston XS1000/XS2000, ADATA SE880, …).
 
 ## The idea
 
@@ -24,25 +26,32 @@ live leaderboard.
 ## Usage
 
 ```bash
-python3 ssd_price_search.py                      # hunt 1 TB across all good-value brands
-python3 ssd_price_search.py --brands crucial wd  # restrict brands
-python3 ssd_price_search.py --capacity 2         # 2 TB instead
+python3 ssd_price_search.py                       # 1 TB, internal + external, top 20
+python3 ssd_price_search.py --type external       # portable USB drives only
+python3 ssd_price_search.py --type internal       # bare M.2 / SATA only
+python3 ssd_price_search.py --brands crucial wd   # restrict brands
+python3 ssd_price_search.py --capacity 2          # 2 TB instead
+python3 ssd_price_search.py --top 30              # show 30 rows instead of 20
 python3 ssd_price_search.py --query "crucial p3 plus 1tb"
-python3 ssd_price_search.py --json out.json      # also dump machine-readable
-python3 ssd_price_search.py --verbose            # log search/fetch progress
-python3 ssd_price_search.py --selftest           # offline parser verification (no network)
+python3 ssd_price_search.py --json out.json       # also dump machine-readable
+python3 ssd_price_search.py --verbose             # log search/fetch progress
+python3 ssd_price_search.py --selftest            # offline parser verification (no network)
 ```
 
-Sample output:
+Sample output (each row shows the live link, so a dead "best value" listing is
+easy to skip):
 
 ```
-  1 TB SSD VALUE LEADERBOARD  (2026-06-21 14:02 UTC)
-  --------------------------------------------------------------------
-  #       PRICE     $/TB  SELLER              MODEL
-  --------------------------------------------------------------------
-  1      $67.99       68  amazon.com          Crucial P3 Plus 1TB Gen4 NVMe  <- best value
-  2      $74.99       75  newegg.com          WD Blue SN580 1TB NVMe
+  1 TB SSD VALUE LEADERBOARD — top 20  (2026-06-21 14:02 UTC)
+  --------------------------------------------------------------------------------------------
+  #      PRICE   $/TB  TYPE     SELLER          MODEL                         LINK
+  --------------------------------------------------------------------------------------------
+  1     $67.99    68  internal amazon.com      Crucial P3 Plus 1TB Gen4 NVM  https://www.amazon.com/dp/B0C...
+  2     $69.99    70  internal bestbuy.com     Kingston NV3 1TB              https://www.bestbuy.com/site/...
+  4     $84.99    85  external bhphotovideo.co SanDisk Extreme Portable 1TB  https://www.bhphotovideo.com/...
   ...
+  Best internal : $67.99 (68 $/TB)  Crucial P3 Plus 1TB @ amazon.com
+  Best external : $84.99 (85 $/TB)  SanDisk Extreme Portable 1TB @ bhphotovideo.com
 ```
 
 ## Requirements
