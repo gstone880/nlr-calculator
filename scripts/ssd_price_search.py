@@ -107,6 +107,7 @@ class Offer:
     capacity_tb: float = 1.0
     source: str = ""          # which extractor found it (json-ld / microdata / og)
     kind: str = "internal"    # internal | external (portable USB drive)
+    availability: str = ""    # normalized: instock | outofstock | discontinued | ""
 
     @property
     def price_per_tb(self) -> float:
@@ -316,6 +317,22 @@ def _detect_kind(title: str) -> str:
     return "external" if any(h in t for h in _EXTERNAL_HINTS) else "internal"
 
 
+def _norm_availability(val) -> str:
+    """Normalize a Schema.org availability value (e.g. 'https://schema.org/InStock',
+    'OutOfStock', 'SoldOut') to one of: instock | outofstock | discontinued | ''."""
+    if not val:
+        return ""
+    s = str(val).lower()
+    if any(x in s for x in ("discontinued",)):
+        return "discontinued"
+    if any(x in s for x in ("outofstock", "out of stock", "soldout", "sold out",
+                            "backorder", "back order", "discontinued")):
+        return "outofstock"
+    if "instock" in s or "in stock" in s or "onlineonly" in s or "limitedavailability" in s:
+        return "instock"
+    return ""
+
+
 def _detect_capacity_tb(title: str) -> float:
     t = title.lower()
     m = re.search(r"(\d+(?:\.\d+)?)\s*tb", t)
@@ -327,9 +344,25 @@ def _detect_capacity_tb(title: str) -> float:
     return 1.0
 
 
+_DEAD_PAGE_SIGNALS = (
+    "page not found", "404 not found", "no longer available",
+    "currently unavailable", "product not found", "item is no longer",
+    "this page isn", "we couldn't find", "sorry, we couldn",
+)
+
+
+def _page_looks_dead(page_html: str) -> bool:
+    """Conservative check for discontinued/404 pages that search engines still
+    index. Only inspects the <title> to avoid false positives from body copy."""
+    title = (_html_title(page_html) or "").lower()
+    return any(sig in title for sig in _DEAD_PAGE_SIGNALS)
+
+
 def extract_offers(page_html: str, page_url: str) -> list[Offer]:
     seller = urllib.parse.urlparse(page_url).netloc.replace("www.", "")
     offers: list[Offer] = []
+    if _page_looks_dead(page_html):
+        return offers
 
     # --- 1. JSON-LD (richest, most reliable) ---------------------------------
     nodes: list[dict] = []
@@ -364,6 +397,7 @@ def extract_offers(page_html: str, page_url: str) -> list[Offer]:
                 title=str(name)[:90], price=price, currency=cur, url=page_url,
                 seller=seller, capacity_tb=_detect_capacity_tb(str(name)),
                 source="json-ld", kind=_detect_kind(str(name)),
+                availability=_norm_availability(ob.get("availability")),
             ))
 
     # --- 2. Microdata / OpenGraph meta (fallback when no JSON-LD) ------------
@@ -374,10 +408,13 @@ def extract_offers(page_html: str, page_url: str) -> list[Offer]:
         if price and price > 0:
             cur = (_meta_content(page_html, ["product:price:currency", "og:price:currency"])
                    or "USD").upper()
+            avail = _meta_content(page_html, [
+                "product:availability", "og:availability", "availability"])
             offers.append(Offer(
                 title=str(page_title)[:90], price=price, currency=cur, url=page_url,
                 seller=seller, capacity_tb=_detect_capacity_tb(str(page_title)),
                 source="meta", kind=_detect_kind(str(page_title)),
+                availability=_norm_availability(avail),
             ))
 
     return offers
@@ -459,10 +496,15 @@ def hunt(queries: list[str], limit: int, timeout: float, workers: int,
 
 
 def dedupe_and_rank(offers: list[Offer], capacity: float,
-                    per_seller_cap: int = 4) -> list[Offer]:
+                    per_seller_cap: int = 4, include_unavailable: bool = False) -> list[Offer]:
     # keep offers within +-25% of the requested capacity and at a sane price
     lo, hi = capacity * 0.75, capacity * 1.25
     filtered = [o for o in offers if lo <= o.capacity_tb <= hi and 5 <= o.price_per_tb <= 1000]
+    # drop listings the page itself flags as gone — this is the main cause of
+    # "old links no longer available" (search engines keep indexing dead pages).
+    if not include_unavailable:
+        filtered = [o for o in filtered
+                    if o.availability not in ("outofstock", "discontinued")]
 
     # collapse only true duplicates: same product page, or same seller listing the
     # same model at the same price. We deliberately keep DISTINCT models from one
@@ -552,6 +594,20 @@ _FIXTURE_EXT = """
 </script></head></html>
 """
 
+_FIXTURE_OOS = """
+<html><head><title>Crucial P3 1TB SSD</title>
+<script type="application/ld+json">
+{"@type":"Product","name":"Crucial P3 1TB SSD",
+ "offers":{"@type":"Offer","price":"55.00","priceCurrency":"USD",
+           "availability":"https://schema.org/OutOfStock"}}
+</script></head></html>
+"""
+
+_FIXTURE_DEAD = """
+<html><head><title>Page Not Found | Newegg.com</title></head>
+<body>The product you are looking for is no longer available.</body></html>
+"""
+
 
 def selftest() -> int:
     ok = True
@@ -576,6 +632,16 @@ def selftest() -> int:
 
     check("$/TB math", abs(Offer("x", 80.0, "USD", "", "s", 2.0).price_per_tb - 40.0) < 1e-6)
     check("capacity from GB (500GB -> 0.5TB)", abs(_detect_capacity_tb("Crucial 500GB") - 0.5) < 1e-3)
+
+    # availability / dead-link filtering (the "old links no longer available" fix)
+    oos = extract_offers(_FIXTURE_OOS, "https://www.newegg.com/p/OOS")
+    check("out-of-stock availability parsed", oos and oos[0].availability == "outofstock")
+    check("out-of-stock dropped by default", dedupe_and_rank(oos, 1.0) == [])
+    check("out-of-stock kept with include_unavailable",
+          len(dedupe_and_rank(oos, 1.0, include_unavailable=True)) == 1)
+    check("in-stock availability parsed", a and a[0].availability == "instock")
+    check("dead 404 page yields no offers",
+          extract_offers(_FIXTURE_DEAD, "https://www.newegg.com/p/Dead") == [])
     check("0.5TB capacity token -> 500GB", _cap_token(0.5) == "500GB")
     check("2TB capacity token -> 2TB", _cap_token(2) == "2TB")
     check("500GB query rewrite",
@@ -706,6 +772,9 @@ def main(argv: list[str]) -> int:
                    help="search engines to use, in order (default: all). "
                         "Choices: " + ", ".join(SEARCH_ENGINES))
     p.add_argument("--timeout", type=float, default=12.0, help="per-request timeout seconds")
+    p.add_argument("--include-unavailable", action="store_true",
+                   help="also show listings flagged out-of-stock/discontinued "
+                        "(hidden by default to avoid dead links)")
     p.add_argument("--json", metavar="FILE", help="also write results as JSON")
     p.add_argument("--selftest", action="store_true", help="run offline parser tests and exit")
     p.add_argument("--verbose", action="store_true", help="log search/fetch progress to stderr")
@@ -726,7 +795,8 @@ def main(argv: list[str]) -> int:
 
     offers = hunt(queries, args.limit, args.timeout, args.workers, args.verbose,
                   args.engines)
-    ranked = dedupe_and_rank(offers, args.capacity)
+    ranked = dedupe_and_rank(offers, args.capacity,
+                             include_unavailable=args.include_unavailable)
     print_leaderboard(ranked, args.capacity, args.top)
 
     if args.json:

@@ -84,6 +84,10 @@ python3 ssd_price_search.py --engines ddg-lite --verbose
 - Search front-ends rate-limit aggressively, especially over mobile data. If a
   run comes back thin, add `--verbose`, try different `--engines`, pass an
   explicit `--query`, or run on Wi-Fi.
+- **Dead / out-of-stock listings are hidden by default.** Search engines keep
+  indexing discontinued product pages; the script reads each offer's Schema.org
+  `availability` and drops anything flagged out-of-stock/discontinued, and skips
+  pages whose title reads like a 404. Pass `--include-unavailable` to see them.
 - This is a price-discovery aid, not financial advice. Confirm on the
   retailer's page before buying.
 ```
