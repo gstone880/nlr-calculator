@@ -30,6 +30,7 @@ python3 ssd_price_search.py                       # 1 TB, internal + external, t
 python3 ssd_price_search.py --type external       # portable USB drives only
 python3 ssd_price_search.py --type internal       # bare M.2 / SATA only
 python3 ssd_price_search.py --brands crucial wd   # restrict brands
+python3 ssd_price_search.py --capacity 0.5         # 500 GB instead of 1 TB
 python3 ssd_price_search.py --capacity 2          # 2 TB instead
 python3 ssd_price_search.py --top 30              # show 30 rows instead of 20
 python3 ssd_price_search.py --query "crucial p3 plus 1tb"
