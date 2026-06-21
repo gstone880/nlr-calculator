@@ -531,6 +531,61 @@ def dedupe_and_rank(offers: list[Offer], capacity: float,
     return capped
 
 
+# strong "this listing is gone" signals to look for in a live page's body when
+# explicitly link-checking (opt-in, so a little aggressiveness is acceptable).
+_DEAD_BODY_SIGNALS = (
+    "currently unavailable", "no longer available", "out of stock",
+    "sold out", "page not found", "product not found", "item is no longer",
+    "this item is unavailable", "404 error",
+)
+
+
+def link_is_live(url: str, timeout: float, verbose: bool = False) -> bool:
+    """Ping a product URL and decide whether it's a real, still-available page.
+    Dead if it errors, 4xx/5xx, redirects to a site root, or the body shouts
+    'unavailable'. HEAD first; fall back to a streamed GET for the body check."""
+    try:
+        if _SESSION is None:  # urllib fallback: just check it loads
+            req = urllib.request.Request(url, headers={"User-Agent": _next_ua()})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return getattr(r, "status", 200) < 400
+        headers = {"User-Agent": _next_ua()}
+        r = _SESSION.get(url, headers=headers, timeout=timeout,
+                         allow_redirects=True, stream=True)
+        status = r.status_code
+        final = r.url
+        # redirected to the bare domain root => the product page is gone
+        landed_root = urllib.parse.urlparse(final).path.strip("/") == ""
+        body = ""
+        if status < 400 and not landed_root:
+            body = r.raw.read(20000, decode_content=True).decode("utf-8", "replace").lower()
+        r.close()
+        if status >= 400 or landed_root:
+            if verbose:
+                print(f"    [dead {status}{' root-redirect' if landed_root else ''}] {url}",
+                      file=sys.stderr)
+            return False
+        if any(sig in body for sig in _DEAD_BODY_SIGNALS):
+            if verbose:
+                print(f"    [dead unavailable-text] {url}", file=sys.stderr)
+            return False
+        return True
+    except Exception as e:
+        if verbose:
+            print(f"    [dead {type(e).__name__}] {url}", file=sys.stderr)
+        return False
+
+
+def verify_live_links(offers: list[Offer], timeout: float, workers: int,
+                      verbose: bool) -> list[Offer]:
+    """Keep only offers whose link passes link_is_live, checked in parallel."""
+    if not offers:
+        return offers
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        verdicts = list(ex.map(lambda o: link_is_live(o.url, timeout, verbose), offers))
+    return [o for o, ok in zip(offers, verdicts) if ok]
+
+
 def print_leaderboard(offers: list[Offer], capacity: float, top: int = 20) -> None:
     if not offers:
         print("\nNo live offers parsed. Search front-ends may be rate-limiting, or "
@@ -642,6 +697,9 @@ def selftest() -> int:
     check("in-stock availability parsed", a and a[0].availability == "instock")
     check("dead 404 page yields no offers",
           extract_offers(_FIXTURE_DEAD, "https://www.newegg.com/p/Dead") == [])
+    check("dead-body signal list catches 'currently unavailable'",
+          any(s in "this item is currently unavailable" for s in _DEAD_BODY_SIGNALS))
+    check("verify_live_links no-ops on empty list", verify_live_links([], 1.0, 2, False) == [])
     check("0.5TB capacity token -> 500GB", _cap_token(0.5) == "500GB")
     check("2TB capacity token -> 2TB", _cap_token(2) == "2TB")
     check("500GB query rewrite",
@@ -775,6 +833,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--include-unavailable", action="store_true",
                    help="also show listings flagged out-of-stock/discontinued "
                         "(hidden by default to avoid dead links)")
+    p.add_argument("--check-links", action="store_true",
+                   help="ping each finalist link and drop any that 404, redirect "
+                        "to a homepage, or read as unavailable (slower, thorough)")
     p.add_argument("--json", metavar="FILE", help="also write results as JSON")
     p.add_argument("--selftest", action="store_true", help="run offline parser tests and exit")
     p.add_argument("--verbose", action="store_true", help="log search/fetch progress to stderr")
@@ -797,6 +858,11 @@ def main(argv: list[str]) -> int:
                   args.engines)
     ranked = dedupe_and_rank(offers, args.capacity,
                              include_unavailable=args.include_unavailable)
+    if args.check_links and ranked:
+        before = len(ranked)
+        print(f"  verifying {before} links are live (--check-links)...")
+        ranked = verify_live_links(ranked, args.timeout, args.workers, args.verbose)
+        print(f"  {len(ranked)} of {before} links confirmed live")
     print_leaderboard(ranked, args.capacity, args.top)
 
     if args.json:
