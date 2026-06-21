@@ -1,46 +1,48 @@
-<!-- Synthetic fixture mirroring Newegg's typical search-result markup, used only to
-     offline-test crawler.py's parser. Not real scraped content. -->
+<!-- Synthetic fixture mirroring Newegg's real search-result markup (verified
+     against a live page on 2026-06-21), used only to offline-test crawler.py's
+     parser. Not real scraped content. Brand comes from a "Brand:" row inside
+     .item-features -- there is no .item-brand image element. -->
 <html><body>
 <div class="list-wrap">
   <div class="item-cell">
     <div class="item-container">
-      <a class="item-brand"><img src="samsung.png" title="Samsung" alt="Samsung Logo"></a>
       <a class="item-title" href="https://www.newegg.com/samsung-t7-1tb/p/12345">SAMSUNG T7 Shield 1TB Portable SSD External Solid State Drive</a>
-      <ul class="price"><li class="price-current">$<strong>64</strong><sup>.99</sup></li></ul>
+      <ul class="item-features"><li><strong>Brand:</strong> SAMSUNG</li></ul>
+      <ul class="price"><li class="price-current"><span class="price-current-label"></span>$<strong>64</strong><sup>.99</sup></li></ul>
     </div>
   </div>
   <div class="item-cell">
     <div class="item-container">
-      <a class="item-brand"><img src="crucial.png" title="Crucial" alt="Crucial Logo"></a>
       <a class="item-title" href="https://www.newegg.com/crucial-x9-1tb/p/23456">Crucial X9 1TB Portable SSD External</a>
+      <ul class="item-features"><li><strong>Brand:</strong> Crucial</li></ul>
       <ul class="price"><li class="price-current">$59.99</li></ul>
     </div>
   </div>
   <div class="item-cell">
     <div class="item-container">
-      <a class="item-brand"><img src="sandisk.png" title="SanDisk" alt="SanDisk Logo"></a>
       <a class="item-title" href="https://www.newegg.com/sandisk-1tb-internal/p/34567">SanDisk 1TB Internal SSD</a>
+      <ul class="item-features"><li><strong>Brand:</strong> SanDisk</li></ul>
       <ul class="price"><li class="price-current">$54.99</li></ul>
     </div>
   </div>
   <div class="item-cell">
     <div class="item-container">
-      <a class="item-brand"><img src="seagate.png" title="Seagate" alt="Seagate Logo"></a>
       <a class="item-title" href="https://www.newegg.com/seagate-2tb/p/45678">Seagate One Touch 2TB External SSD</a>
+      <ul class="item-features"><li><strong>Brand:</strong> Seagate</li></ul>
       <ul class="price"><li class="price-current">$79.99</li></ul>
     </div>
   </div>
   <div class="item-cell">
     <div class="item-container">
-      <a class="item-brand"><img src="wd.png" title="WD" alt="WD Logo"></a>
       <a class="item-title" href="https://www.newegg.com/wd-1tb-overpriced/p/56789">WD My Passport 1TB External Portable SSD</a>
+      <ul class="item-features"><li><strong>Brand:</strong> WD</li></ul>
       <ul class="price"><li class="price-current">$89.99</li></ul>
     </div>
   </div>
   <div class="item-cell">
     <div class="item-container">
-      <a class="item-brand"><img src="noname.png" title="GenericBrand" alt="GenericBrand Logo"></a>
       <a class="item-title" href="https://www.newegg.com/noname-1tb/p/67890">GenericBrand 1TB Portable SSD External</a>
+      <ul class="item-features"><li><strong>Brand:</strong> GenericBrand</li></ul>
       <ul class="price"><li class="price-current">$39.99</li></ul>
     </div>
   </div>

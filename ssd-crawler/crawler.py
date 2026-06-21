@@ -85,6 +85,17 @@ def _extract_price(price_el):
     return None
 
 
+def _extract_brand(cell):
+    """Brand is listed as a 'Brand:' row inside .item-features -- there's
+    no dedicated brand image/element in current Newegg markup."""
+    for li in cell.select(".item-features li"):
+        label_el = li.find("strong")
+        if not label_el or label_el.get_text(strip=True).rstrip(":").lower() != "brand":
+            continue
+        return li.get_text(" ", strip=True).split(":", 1)[-1].strip()
+    return None
+
+
 def parse_listings(html):
     soup = BeautifulSoup(html, "html.parser")
     listings = []
@@ -95,8 +106,7 @@ def parse_listings(html):
         name = title_el.get_text(strip=True)
         url = title_el.get("href", "")
         price = _extract_price(cell.select_one(".price-current"))
-        brand_el = cell.select_one(".item-brand img")
-        brand = (brand_el.get("title") or brand_el.get("alt")) if brand_el else None
+        brand = _extract_brand(cell)
         listings.append({"name": name, "url": url, "price": price, "brand": brand})
     return listings
 
