@@ -176,7 +176,10 @@ SEARCH_ENGINES: dict[str, str] = {
     "mojeek":    "https://www.mojeek.com/search?q={q}",
     "startpage": "https://www.startpage.com/sp/search?query={q}",
 }
-DEFAULT_ENGINE_ORDER = ["ddg-lite", "bing", "mojeek", "ddg-html", "brave", "startpage"]
+# DuckDuckGo first (it's what reliably returns results); mojeek/startpage are
+# quiet fallbacks. Bing and brave are NOT in the default order — they frequently
+# return nothing for scraped queries — but stay selectable via --engines.
+DEFAULT_ENGINE_ORDER = ["ddg-lite", "ddg-html", "mojeek", "startpage"]
 
 
 def search_urls(query: str, limit: int, timeout: float, verbose: bool,
