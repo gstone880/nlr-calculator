@@ -833,9 +833,13 @@ def main(argv: list[str]) -> int:
     p.add_argument("--include-unavailable", action="store_true",
                    help="also show listings flagged out-of-stock/discontinued "
                         "(hidden by default to avoid dead links)")
-    p.add_argument("--check-links", action="store_true",
-                   help="ping each finalist link and drop any that 404, redirect "
-                        "to a homepage, or read as unavailable (slower, thorough)")
+    # Live link verification is ON by default. --check-links is kept as an
+    # accepted no-op so existing shortcuts/buttons that pass it still work.
+    p.add_argument("--check-links", dest="check_links", action="store_true", default=True,
+                   help="(default) ping each finalist link and drop any that 404, "
+                        "redirect to a homepage, or read as unavailable")
+    p.add_argument("--no-check-links", dest="check_links", action="store_false",
+                   help="skip live-link verification for a faster run")
     p.add_argument("--json", metavar="FILE", help="also write results as JSON")
     p.add_argument("--selftest", action="store_true", help="run offline parser tests and exit")
     p.add_argument("--verbose", action="store_true", help="log search/fetch progress to stderr")
@@ -860,7 +864,7 @@ def main(argv: list[str]) -> int:
                              include_unavailable=args.include_unavailable)
     if args.check_links and ranked:
         before = len(ranked)
-        print(f"  verifying {before} links are live (--check-links)...")
+        print(f"  verifying {before} links are live (use --no-check-links to skip)...")
         ranked = verify_live_links(ranked, args.timeout, args.workers, args.verbose)
         print(f"  {len(ranked)} of {before} links confirmed live")
     print_leaderboard(ranked, args.capacity, args.top)
