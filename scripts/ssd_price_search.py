@@ -48,11 +48,13 @@ from dataclasses import dataclass, field, asdict
 from typing import Iterable
 
 # ----------------------------------------------------------------------------
-# Curated "good value" 1 TB models. These are the price/performance darlings that
-# repeatedly top value charts — DRAM-less but fast TLC NVMe plus a couple of
-# rock-solid SATA options. Tune freely.
+# Curated "good value" 1 TB models, split by form factor. These are the
+# price/performance darlings that repeatedly top value charts. Tune freely.
+#
+#   internal -> bare M.2 NVMe / 2.5" SATA drives that live inside a PC
+#   external -> portable USB-C drives you plug into a phone, laptop, console
 # ----------------------------------------------------------------------------
-GOOD_VALUE_MODELS: dict[str, list[str]] = {
+INTERNAL_MODELS: dict[str, list[str]] = {
     "crucial":       ["Crucial P3 Plus 1TB", "Crucial T500 1TB", "Crucial BX500 1TB"],
     "wd":            ["WD Blue SN580 1TB", "WD Black SN770 1TB"],
     "samsung":       ["Samsung 990 EVO 1TB", "Samsung 870 EVO 1TB"],
@@ -62,12 +64,25 @@ GOOD_VALUE_MODELS: dict[str, list[str]] = {
     "skhynix":       ["SK hynix Platinum P41 1TB"],
 }
 
+EXTERNAL_MODELS: dict[str, list[str]] = {
+    "samsung":       ["Samsung T7 1TB portable SSD", "Samsung T9 1TB portable SSD"],
+    "crucial":       ["Crucial X9 Pro 1TB portable SSD", "Crucial X10 Pro 1TB portable SSD"],
+    "wd":            ["WD My Passport SSD 1TB", "SanDisk Extreme Portable SSD 1TB"],
+    "sandisk":       ["SanDisk Extreme Portable SSD 1TB", "SanDisk Extreme Pro Portable SSD 1TB"],
+    "kingston":      ["Kingston XS1000 1TB external SSD", "Kingston XS2000 1TB external SSD"],
+    "adata":         ["ADATA SE880 1TB external SSD"],
+    "teamgroup":     ["TeamGroup PD20 1TB portable SSD"],
+}
+
+# Back-compat alias used by callers/tests that predate the internal/external split.
+GOOD_VALUE_MODELS = INTERNAL_MODELS
+
 # Retailers we trust enough to read a structured-data price from. Keeps junk
 # marketplaces and price-history aggregators out of the leaderboard.
 RETAILER_HINTS = (
     "amazon.", "newegg.", "bestbuy.", "bhphotovideo.", "microcenter.",
     "crucial.", "westerndigital.", "samsung.", "kingston.", "walmart.",
-    "adorama.", "microsoft.", "store.", "bh.photo",
+    "adorama.", "microsoft.", "store.", "bh.photo", "sandisk.", "adata.",
 )
 
 USER_AGENTS = [
@@ -91,6 +106,7 @@ class Offer:
     seller: str
     capacity_tb: float = 1.0
     source: str = ""          # which extractor found it (json-ld / microdata / og)
+    kind: str = "internal"    # internal | external (portable USB drive)
 
     @property
     def price_per_tb(self) -> float:
@@ -244,6 +260,16 @@ def _walk_jsonld(node, found: list[dict]) -> None:
                 _walk_jsonld(v, found)
 
 
+_EXTERNAL_HINTS = ("portable", "external", "usb", "thunderbolt", " t7", " t9",
+                   "my passport", "extreme", "xs1000", "xs2000", "se880", " x9",
+                   " x10", " pd20")
+
+
+def _detect_kind(title: str) -> str:
+    t = title.lower()
+    return "external" if any(h in t for h in _EXTERNAL_HINTS) else "internal"
+
+
 def _detect_capacity_tb(title: str) -> float:
     t = title.lower()
     m = re.search(r"(\d+(?:\.\d+)?)\s*tb", t)
@@ -291,7 +317,7 @@ def extract_offers(page_html: str, page_url: str) -> list[Offer]:
             offers.append(Offer(
                 title=str(name)[:90], price=price, currency=cur, url=page_url,
                 seller=seller, capacity_tb=_detect_capacity_tb(str(name)),
-                source="json-ld",
+                source="json-ld", kind=_detect_kind(str(name)),
             ))
 
     # --- 2. Microdata / OpenGraph meta (fallback when no JSON-LD) ------------
@@ -305,7 +331,7 @@ def extract_offers(page_html: str, page_url: str) -> list[Offer]:
             offers.append(Offer(
                 title=str(page_title)[:90], price=price, currency=cur, url=page_url,
                 seller=seller, capacity_tb=_detect_capacity_tb(str(page_title)),
-                source="meta",
+                source="meta", kind=_detect_kind(str(page_title)),
             ))
 
     return offers
@@ -384,36 +410,62 @@ def hunt(queries: list[str], limit: int, timeout: float, workers: int,
     return offers
 
 
-def dedupe_and_rank(offers: list[Offer], capacity: float) -> list[Offer]:
-    # keep offers within +-25% of the requested capacity
+def dedupe_and_rank(offers: list[Offer], capacity: float,
+                    per_seller_cap: int = 4) -> list[Offer]:
+    # keep offers within +-25% of the requested capacity and at a sane price
     lo, hi = capacity * 0.75, capacity * 1.25
     filtered = [o for o in offers if lo <= o.capacity_tb <= hi and 5 <= o.price_per_tb <= 1000]
-    # one cheapest offer per seller
-    best_by_seller: dict[str, Offer] = {}
+
+    # collapse only true duplicates: same product page, or same seller listing the
+    # same model at the same price. We deliberately keep DISTINCT models from one
+    # seller so the list has variety and you always have backup links if the
+    # cheapest row turns out to be a dead/bad listing.
+    unique: dict[tuple, Offer] = {}
     for o in filtered:
-        cur = best_by_seller.get(o.seller)
-        if cur is None or o.price_per_tb < cur.price_per_tb:
-            best_by_seller[o.seller] = o
-    return sorted(best_by_seller.values(), key=lambda o: o.price_per_tb)
+        canon_url = o.url.split("?")[0].rstrip("/")
+        key = (canon_url, o.seller, round(o.price, 2), o.kind)
+        if key not in unique:
+            unique[key] = o
+
+    ranked = sorted(unique.values(), key=lambda o: o.price_per_tb)
+
+    # cap how many rows any single seller contributes, so one store with dozens of
+    # SKUs can't crowd out the rest of the field.
+    counts: dict[str, int] = {}
+    capped: list[Offer] = []
+    for o in ranked:
+        n = counts.get(o.seller, 0)
+        if n < per_seller_cap:
+            counts[o.seller] = n + 1
+            capped.append(o)
+    return capped
 
 
-def print_leaderboard(offers: list[Offer], capacity: float) -> None:
+def print_leaderboard(offers: list[Offer], capacity: float, top: int = 20) -> None:
     if not offers:
         print("\nNo live offers parsed. Search front-ends may be rate-limiting, or "
               "egress is blocked.\nTry --verbose, a direct --query, or run again shortly.")
         return
-    print(f"\n  1 TB SSD VALUE LEADERBOARD  ({time.strftime('%Y-%m-%d %H:%M %Z')})")
-    print("  " + "-" * 68)
-    print(f"  {'#':<3}{'PRICE':>10}{'$/TB':>9}  {'SELLER':<20}{'MODEL'}")
-    print("  " + "-" * 68)
-    for i, o in enumerate(offers, 1):
-        tag = "  <- best value" if i == 1 else ""
-        print(f"  {i:<3}{o.money():>10}{o.price_per_tb:>8.0f}  {o.seller[:19]:<20}"
-              f"{o.title[:34]}{tag}")
-    print("  " + "-" * 68)
-    best = offers[0]
-    print(f"  Best value: {best.title}")
-    print(f"              {best.money()} at {best.seller}  ->  {best.url}\n")
+    shown = offers[:top]
+    print(f"\n  {capacity:g} TB SSD VALUE LEADERBOARD — top {len(shown)}  "
+          f"({time.strftime('%Y-%m-%d %H:%M %Z')})")
+    print("  " + "-" * 92)
+    print(f"  {'#':<3}{'PRICE':>9}{'$/TB':>7}  {'TYPE':<9}{'SELLER':<16}{'MODEL':<30}LINK")
+    print("  " + "-" * 92)
+    for i, o in enumerate(shown, 1):
+        # show the real link so a dead 'best value' row is easy to skip past
+        print(f"  {i:<3}{o.money():>9}{o.price_per_tb:>6.0f}  {o.kind:<9}"
+              f"{o.seller[:15]:<16}{o.title[:28]:<30}{o.url[:46]}")
+    print("  " + "-" * 92)
+    # call out the best in each form factor present, not just the overall winner
+    for kind in ("internal", "external"):
+        picks = [o for o in shown if o.kind == kind]
+        if picks:
+            b = picks[0]
+            print(f"  Best {kind:<9}: {b.money()} ({b.price_per_tb:.0f} $/TB)  "
+                  f"{b.title[:34]} @ {b.seller}")
+    print("\n  Tip: links are listed so you can skip any dead/bad 'best value' row "
+          "and use the next one.\n")
 
 
 # ----------------------------------------------------------------------------
@@ -444,6 +496,14 @@ _FIXTURE_EU = """
 </script></head></html>
 """
 
+_FIXTURE_EXT = """
+<html><head><title>Samsung T7 1TB Portable SSD USB-C</title>
+<script type="application/ld+json">
+{"@type":"Product","name":"Samsung T7 1TB Portable SSD USB 3.2",
+ "offers":{"@type":"Offer","price":"89.99","priceCurrency":"USD"}}
+</script></head></html>
+"""
+
 
 def selftest() -> int:
     ok = True
@@ -469,6 +529,25 @@ def selftest() -> int:
     check("$/TB math", abs(Offer("x", 80.0, "USD", "", "s", 2.0).price_per_tb - 40.0) < 1e-6)
     check("capacity from GB (500GB -> 0.5TB)", abs(_detect_capacity_tb("Crucial 500GB") - 0.5) < 1e-3)
 
+    check("internal drive tagged internal", a and a[0].kind == "internal")
+
+    e = extract_offers(_FIXTURE_EXT, "https://www.amazon.com/dp/T7")
+    check("external/portable price parsed", len(e) == 1 and abs(e[0].price - 89.99) < 1e-6)
+    check("portable drive tagged external", e and e[0].kind == "external")
+
+    # internal + external from the SAME seller must both survive ranking
+    same_seller = extract_offers(_FIXTURE, "https://www.amazon.com/dp/X") + \
+        extract_offers(_FIXTURE_EXT, "https://www.amazon.com/dp/T7")
+    ranked_mixed = dedupe_and_rank(same_seller, 1.0)
+    check("internal+external kept separately per seller",
+          {o.kind for o in ranked_mixed} == {"internal", "external"})
+
+    q_int = build_queries(["crucial"], 1.0, None, "internal")
+    q_ext = build_queries(["samsung"], 1.0, None, "external")
+    check("internal query catalog used", any("P3 Plus" in q for q in q_int))
+    check("external query catalog used", any("T7" in q or "portable" in q.lower()
+                                             for q in q_ext))
+
     ranked = dedupe_and_rank(a + b, 1.0)
     check("ranking sorts by $/TB", [round(o.price_per_tb) for o in ranked] == [68, 75])
 
@@ -479,22 +558,47 @@ def selftest() -> int:
 # ----------------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------------
-def build_queries(brands: list[str], capacity: float, override: str | None) -> list[str]:
+def catalogs_for_type(drive_type: str) -> list[dict[str, list[str]]]:
+    """Return the model catalog(s) matching internal / external / all."""
+    if drive_type == "internal":
+        return [INTERNAL_MODELS]
+    if drive_type == "external":
+        return [EXTERNAL_MODELS]
+    return [INTERNAL_MODELS, EXTERNAL_MODELS]
+
+
+def build_queries(brands: list[str], capacity: float, override: str | None,
+                  drive_type: str = "all") -> list[str]:
     if override:
         return [override]
     cap = f"{capacity:g}TB"
+    catalogs = catalogs_for_type(drive_type)
     queries: list[str] = []
     for b in brands:
-        models = GOOD_VALUE_MODELS.get(b.lower())
-        if models:
-            queries.extend(models)
-        else:
-            queries.append(f"{b} {cap} SSD")
+        matched = False
+        for catalog in catalogs:
+            models = catalog.get(b.lower())
+            if models:
+                queries.extend(models)
+                matched = True
+        if not matched:
+            # brand not in our curated lists — build a generic query, and make the
+            # form factor explicit so we don't mix internal/external results.
+            suffix = {"internal": "internal SSD", "external": "portable SSD"}.get(
+                drive_type, "SSD")
+            queries.append(f"{b} {cap} {suffix}")
     # the curated model names are 1 TB; rewrite the capacity token when asked for
     # something else (e.g. "Crucial P3 Plus 1TB" -> "Crucial P3 Plus 2TB").
     if capacity != 1:
         queries = [re.sub(r"\d+(?:\.\d+)?\s*TB", cap, q, flags=re.I) for q in queries]
-    return queries
+    # de-dupe while preserving order (brands can appear in both catalogs)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for q in queries:
+        if q.lower() not in seen:
+            seen.add(q.lower())
+            deduped.append(q)
+    return deduped
 
 
 def main(argv: list[str]) -> int:
@@ -502,10 +606,16 @@ def main(argv: list[str]) -> int:
         description="Find realtime pricing for a 1 TB SSD from good-value brands "
                     "by harvesting retailer structured data.")
     p.add_argument("--capacity", type=float, default=1.0, help="capacity in TB (default 1)")
-    p.add_argument("--brands", nargs="+", default=list(GOOD_VALUE_MODELS),
-                   help="brands to hunt (default: all curated good-value brands)")
+    p.add_argument("--type", dest="drive_type", choices=["internal", "external", "all"],
+                   default="all",
+                   help="drive form factor: internal M.2/SATA, external/portable "
+                        "USB drives, or all (default all)")
+    p.add_argument("--brands", nargs="+", default=None,
+                   help="brands to hunt (default: all curated good-value brands "
+                        "for the chosen --type)")
     p.add_argument("--query", help="override the search with a single explicit query")
-    p.add_argument("--limit", type=int, default=4, help="product pages per query (default 4)")
+    p.add_argument("--top", type=int, default=20, help="rows to show in the leaderboard (default 20)")
+    p.add_argument("--limit", type=int, default=6, help="product pages per query (default 6)")
     p.add_argument("--workers", type=int, default=8, help="parallel fetches (default 8)")
     p.add_argument("--timeout", type=float, default=12.0, help="per-request timeout seconds")
     p.add_argument("--json", metavar="FILE", help="also write results as JSON")
@@ -516,19 +626,25 @@ def main(argv: list[str]) -> int:
     if args.selftest:
         return selftest()
 
-    queries = build_queries(args.brands, args.capacity, args.query)
-    print(f"Hunting {args.capacity:g} TB SSD across {len(queries)} model queries "
-          f"from: {', '.join(args.brands)}")
+    if args.brands is None:
+        brands = sorted({b for c in catalogs_for_type(args.drive_type) for b in c})
+    else:
+        brands = args.brands
+
+    queries = build_queries(brands, args.capacity, args.query, args.drive_type)
+    label = {"internal": "internal", "external": "external/portable", "all": "internal + external"}
+    print(f"Hunting {args.capacity:g} TB {label[args.drive_type]} SSD across "
+          f"{len(queries)} model queries from: {', '.join(brands)}")
 
     offers = hunt(queries, args.limit, args.timeout, args.workers, args.verbose)
     ranked = dedupe_and_rank(offers, args.capacity)
-    print_leaderboard(ranked, args.capacity)
+    print_leaderboard(ranked, args.capacity, args.top)
 
     if args.json:
         with open(args.json, "w") as f:
             json.dump([{**asdict(o), "price_per_tb": round(o.price_per_tb, 2)}
-                       for o in ranked], f, indent=2)
-        print(f"  wrote {len(ranked)} offers to {args.json}")
+                       for o in ranked[:args.top]], f, indent=2)
+        print(f"  wrote {len(ranked[:args.top])} offers to {args.json}")
 
     return 0 if ranked else 2
 
