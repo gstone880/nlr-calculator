@@ -51,8 +51,10 @@ def robots_allow(url):
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     rp = urllib.robotparser.RobotFileParser()
     try:
-        rp.set_url(robots_url)
-        rp.read()
+        req = urllib.request.Request(robots_url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            lines = resp.read().decode("utf-8", errors="replace").splitlines()
+        rp.parse(lines)
     except Exception:
         return False
     return rp.can_fetch(USER_AGENT, url)
@@ -149,13 +151,20 @@ def main():
 
     html = None
     if args.html_file:
-        with open(args.html_file, "r", encoding="utf-8") as f:
-            html = f.read()
+        try:
+            with open(args.html_file, "r", encoding="utf-8") as f:
+                html = f.read()
+        except OSError as e:
+            print(f"Could not read {args.html_file}: {e}", file=sys.stderr)
+            sys.exit(1)
 
     try:
         deals = find_deals(args.query, args.max_price, brands, html=html)
     except urllib.error.HTTPError as e:
         print(f"Request failed: {e.code} {e.reason}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Request failed: {e.reason}", file=sys.stderr)
         sys.exit(1)
 
     print_deals(deals)
