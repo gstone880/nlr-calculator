@@ -175,15 +175,26 @@ def search_urls(query: str, limit: int, timeout: float, verbose: bool) -> list[s
 
 
 def _clean_ddg_link(href: str) -> str | None:
-    # DDG wraps results as /l/?uddg=<encoded real url>
-    if href.startswith("//duckduckgo.com/l/") or "uddg=" in href:
-        q = urllib.parse.urlparse(href).query
-        params = urllib.parse.parse_qs(q)
+    # DDG wraps organic results as /l/?uddg=<encoded real url>. Decode those.
+    if "uddg=" in href:
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
         if "uddg" in params:
             return urllib.parse.unquote(params["uddg"][0])
+    # Skip DDG's own ad/tracking endpoints (y.js, /l/ without uddg, etc.) — these
+    # embed retailer names in their tracking params and would otherwise sail past
+    # the retailer filter and waste time timing out.
     if href.startswith("http"):
         return href
     return None
+
+
+def _is_retailer_url(url: str) -> bool:
+    """Match RETAILER_HINTS against the HOSTNAME only, so ad/redirect URLs that
+    merely mention a retailer in their query string are rejected."""
+    host = urllib.parse.urlparse(url).netloc.lower()
+    if not host or "duckduckgo.com" in host or "/y.js" in url:
+        return False
+    return any(h.rstrip(".") in host for h in RETAILER_HINTS)
 
 
 def _search_ddg_lite(query: str, limit: int, timeout: float, verbose: bool) -> list[str]:
@@ -194,7 +205,7 @@ def _search_ddg_lite(query: str, limit: int, timeout: float, verbose: bool) -> l
     out: list[str] = []
     for m in re.finditer(r'href="([^"]+)"', body):
         real = _clean_ddg_link(html.unescape(m.group(1)))
-        if real and any(h in real for h in RETAILER_HINTS) and real not in out:
+        if real and _is_retailer_url(real) and real not in out:
             out.append(real)
     return out
 
@@ -205,9 +216,9 @@ def _search_ddg_html(query: str, limit: int, timeout: float, verbose: bool) -> l
     if not body:
         return []
     out: list[str] = []
-    for m in re.finditer(r'class="result__a"[^>]*href="([^"]+)"', body):
+    for m in re.finditer(r'href="([^"]+)"', body):
         real = _clean_ddg_link(html.unescape(m.group(1)))
-        if real and any(h in real for h in RETAILER_HINTS) and real not in out:
+        if real and _is_retailer_url(real) and real not in out:
             out.append(real)
     return out
 
@@ -400,7 +411,9 @@ def hunt(queries: list[str], limit: int, timeout: float, workers: int,
     offers: list[Offer] = []
 
     def _work(u: str) -> list[Offer]:
-        body = fetch(u, timeout=timeout, verbose=verbose)
+        # one shot per product page: on mobile, retrying a slow retailer just
+        # stalls the whole run — better to move on and rely on the other hits.
+        body = fetch(u, timeout=timeout, retries=0, verbose=verbose)
         return extract_offers(body, u) if body else []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
@@ -541,6 +554,16 @@ def selftest() -> int:
     ranked_mixed = dedupe_and_rank(same_seller, 1.0)
     check("internal+external kept separately per seller",
           {o.kind for o in ranked_mixed} == {"internal", "external"})
+
+    # the ad/redirect-link bug: DDG tracking URLs embed retailer names in their
+    # params and must NOT be treated as real product pages.
+    check("real retailer url accepted",
+          _is_retailer_url("https://www.crucial.com/products/ssd/p3-plus"))
+    check("ddg ad/tracking url rejected",
+          not _is_retailer_url("https://duckduckgo.com/y.js?ad_provider=bing&u3=amazon.com"))
+    check("uddg redirect decoded to real url",
+          _clean_ddg_link("//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.newegg.com%2Fp%2FX")
+          == "https://www.newegg.com/p/X")
 
     q_int = build_queries(["crucial"], 1.0, None, "internal")
     q_ext = build_queries(["samsung"], 1.0, None, "external")
