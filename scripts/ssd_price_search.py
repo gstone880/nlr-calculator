@@ -495,7 +495,7 @@ def print_leaderboard(offers: list[Offer], capacity: float, top: int = 20) -> No
               "egress is blocked.\nTry --verbose, a direct --query, or run again shortly.")
         return
     shown = offers[:top]
-    print(f"\n  {capacity:g} TB SSD VALUE LEADERBOARD — top {len(shown)}  "
+    print(f"\n  {_cap_label(capacity)} SSD VALUE LEADERBOARD — top {len(shown)}  "
           f"({time.strftime('%Y-%m-%d %H:%M %Z')})")
     print("  " + "-" * 92)
     print(f"  {'#':<3}{'PRICE':>9}{'$/TB':>7}  {'TYPE':<9}{'SELLER':<16}{'MODEL':<30}LINK")
@@ -576,6 +576,10 @@ def selftest() -> int:
 
     check("$/TB math", abs(Offer("x", 80.0, "USD", "", "s", 2.0).price_per_tb - 40.0) < 1e-6)
     check("capacity from GB (500GB -> 0.5TB)", abs(_detect_capacity_tb("Crucial 500GB") - 0.5) < 1e-3)
+    check("0.5TB capacity token -> 500GB", _cap_token(0.5) == "500GB")
+    check("2TB capacity token -> 2TB", _cap_token(2) == "2TB")
+    check("500GB query rewrite",
+          build_queries(["crucial"], 0.5, None, "internal")[0] == "Crucial P3 Plus 500GB")
 
     check("internal drive tagged internal", a and a[0].kind == "internal")
 
@@ -634,11 +638,23 @@ def catalogs_for_type(drive_type: str) -> list[dict[str, list[str]]]:
     return [INTERNAL_MODELS, EXTERNAL_MODELS]
 
 
+def _cap_token(capacity: float) -> str:
+    """Format a capacity (in TB) the way retailers label it: sub-1 TB as GB
+    (0.5 -> '500GB'), otherwise as TB ('1TB', '2TB')."""
+    if capacity < 1:
+        return f"{int(round(capacity * 1000))}GB"
+    return f"{capacity:g}TB"
+
+
+def _cap_label(capacity: float) -> str:
+    return _cap_token(capacity).replace("GB", " GB").replace("TB", " TB")
+
+
 def build_queries(brands: list[str], capacity: float, override: str | None,
                   drive_type: str = "all") -> list[str]:
     if override:
         return [override]
-    cap = f"{capacity:g}TB"
+    cap = _cap_token(capacity)
     catalogs = catalogs_for_type(drive_type)
     queries: list[str] = []
     for b in brands:
@@ -655,9 +671,9 @@ def build_queries(brands: list[str], capacity: float, override: str | None,
                 drive_type, "SSD")
             queries.append(f"{b} {cap} {suffix}")
     # the curated model names are 1 TB; rewrite the capacity token when asked for
-    # something else (e.g. "Crucial P3 Plus 1TB" -> "Crucial P3 Plus 2TB").
+    # something else ("Crucial P3 Plus 1TB" -> "... 2TB" or "... 500GB").
     if capacity != 1:
-        queries = [re.sub(r"\d+(?:\.\d+)?\s*TB", cap, q, flags=re.I) for q in queries]
+        queries = [re.sub(r"\d+(?:\.\d+)?\s*[TG]B", cap, q, flags=re.I) for q in queries]
     # de-dupe while preserving order (brands can appear in both catalogs)
     seen: set[str] = set()
     deduped: list[str] = []
@@ -672,7 +688,8 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         description="Find realtime pricing for a 1 TB SSD from good-value brands "
                     "by harvesting retailer structured data.")
-    p.add_argument("--capacity", type=float, default=1.0, help="capacity in TB (default 1)")
+    p.add_argument("--capacity", type=float, default=1.0,
+                   help="capacity in TB (default 1; use 0.5 for 500GB, 2 for 2TB)")
     p.add_argument("--type", dest="drive_type", choices=["internal", "external", "all"],
                    default="all",
                    help="drive form factor: internal M.2/SATA, external/portable "
@@ -704,7 +721,7 @@ def main(argv: list[str]) -> int:
 
     queries = build_queries(brands, args.capacity, args.query, args.drive_type)
     label = {"internal": "internal", "external": "external/portable", "all": "internal + external"}
-    print(f"Hunting {args.capacity:g} TB {label[args.drive_type]} SSD across "
+    print(f"Hunting {_cap_label(args.capacity)} {label[args.drive_type]} SSD across "
           f"{len(queries)} model queries from: {', '.join(brands)}")
 
     offers = hunt(queries, args.limit, args.timeout, args.workers, args.verbose,
