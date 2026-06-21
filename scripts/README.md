@@ -64,12 +64,25 @@ installs). HTML is parsed with the standard library.
 pip install -r requirements.txt   # optional
 ```
 
+## Search engines
+
+Product pages are discovered across several independent engines and the results
+are aggregated, so one engine throttling your IP (common on mobile data) just
+gets topped up by the others. Default order: `ddg-lite, bing, mojeek, ddg-html,
+brave, startpage`. Pick a subset with `--engines`:
+
+```bash
+python3 ssd_price_search.py --engines bing mojeek      # skip DuckDuckGo entirely
+python3 ssd_price_search.py --engines ddg-lite --verbose
+```
+
 ## Notes
 
-- Run `--selftest` anytime to confirm the price parser is correct without
-  touching the network.
-- Search front-ends rate-limit aggressively. If a run comes back empty, wait a
-  bit, add `--verbose`, or pass an explicit `--query`.
+- Run `--selftest` anytime to confirm the parser + link handling are correct
+  without touching the network.
+- Search front-ends rate-limit aggressively, especially over mobile data. If a
+  run comes back thin, add `--verbose`, try different `--engines`, pass an
+  explicit `--query`, or run on Wi-Fi.
 - This is a price-discovery aid, not financial advice. Confirm on the
   retailer's page before buying.
 ```
