@@ -88,12 +88,13 @@ python3 ssd_price_search.py --engines ddg-lite --verbose
   indexing discontinued product pages; the script reads each offer's Schema.org
   `availability` and drops anything flagged out-of-stock/discontinued, and skips
   pages whose title reads like a 404. Pass `--include-unavailable` to see them.
-- **`--check-links`** goes further: it pings every finalist and drops any link
-  that 404s, redirects to a homepage, or whose page reads "currently
-  unavailable" / "sold out". Slower (one request per row) but catches stale
-  links from retailers that don't declare stock status. Example:
+- **Live link verification is ON by default.** Every finalist is pinged and any
+  link that 404s, redirects to a homepage, or reads "currently unavailable" /
+  "sold out" is dropped — so the leaderboard only shows links that work right
+  now. It costs one request per row; skip it for a faster run with
+  `--no-check-links`:
   ```bash
-  python3 ssd_price_search.py --check-links
+  python3 ssd_price_search.py --no-check-links   # faster, skips verification
   ```
 - This is a price-discovery aid, not financial advice. Confirm on the
   retailer's page before buying.
