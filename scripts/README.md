@@ -1,3 +1,83 @@
+# Scripts
+
+---
+
+## Halifax Listings Search
+
+`halifax_listings_search.py` — finds Halifax Metro Area (HRM) real estate listings
+that have a **bedroom on the first/main floor at or near driveway level**.
+
+### The problem it solves
+
+Most Halifax homes are **split-entries**: you step up (or down) half a flight from
+the front door before reaching any bedrooms. For aging-in-place, mobility needs, or
+simply wanting to avoid interior stairs, you need the first floor you walk into from
+the driveway to *already have* a bedroom.
+
+### Target property types
+
+| Type | Why it qualifies |
+|------|-----------------|
+| Bungalow / rancher | All living on one level; entry always at grade |
+| One-storey | Same as bungalow |
+| 1.5-storey | Main floor has bedroom(s); roof-space floor above |
+| Ground-floor condo | Unit is at lobby / driveway level |
+
+**Explicitly deprioritised:** split-entry (you go up/down stairs before bedrooms),
+raised bungalow (main floor elevated above grade with exterior stairs).
+
+### Usage
+
+```bash
+python3 halifax_listings_search.py                        # all HRM areas, all prices
+python3 halifax_listings_search.py --area Halifax Dartmouth Bedford
+python3 halifax_listings_search.py --min-beds 2 --max-price 600000
+python3 halifax_listings_search.py --query "Dartmouth NS bungalow 3 bedroom"
+python3 halifax_listings_search.py --json results.json    # also dump machine-readable
+python3 halifax_listings_search.py --verbose              # log fetch progress
+python3 halifax_listings_search.py --selftest             # offline unit tests (no network)
+```
+
+### How it works
+
+Real estate listing sites block direct scraping (HTTP 403). The script uses the same
+approach as `ssd_price_search.py`: it discovers listing URLs from search engine result
+pages (DuckDuckGo, Bing, Mojeek, Startpage), then attempts to read structured-data /
+meta tags from each listing page. Each listing is scored for two signals:
+
+1. **First-floor bedroom** — keywords like "bungalow", "main floor bedroom", "one storey"
+2. **Grade-level entry** — keywords like "level lot", "no steps", "at grade", "bungalow"
+
+Split-entry / raised-foundation keywords subtract from the score. Results are ranked
+highest-relevance first.
+
+### Sample output
+
+```
+  HALIFAX METRO — FIRST-FLOOR BEDROOM / DRIVEWAY-LEVEL LISTINGS
+  Criteria: bedroom on main/first floor · first floor at or near driveway grade
+  Found 12 matches; showing top 12
+
+  #  MATCH    PRICE      BEDS TYPE           MLS           ADDRESS / URL
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  1  STRONG   $549,000   4    bungalow       202512345     613 Beaver Bank Road, Beaver Bank
+     https://www.remaxnova.com/…
+     Charming 4-bedroom bungalow on a level lot. All bedrooms on main floor, no steps…
+  2  STRONG   $559,000   4    1.5 storey     202523004     190 Herring Cove Road, Halifax
+     https://www.kentbraaten.com/…
+     Main floor includes a flexible bedroom (study), 3-pc bath, direct driveway access…
+```
+
+### Requirements
+
+Only `requests` (optional; falls back to `urllib`). No other dependencies.
+
+```bash
+pip install -r requirements.txt   # optional
+```
+
+---
+
 # SSD Price Search
 
 `ssd_price_search.py` — a realtime price hunter for a 1 TB SSD from good-value
